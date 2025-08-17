@@ -1,0 +1,40 @@
+name: Cache database between jobs
+description: "Cache or restore if necessary"
+inputs:
+  DATABASE_URL:
+    required: false
+    description: "The database URL to connect to"
+    default: "postgresql://postgres:GO9KpDi6zh4Ii5KI@db.ymxttutddpexpeefkycj.supabase.co:5432/postgres?schema=public"
+  path:
+    required: false
+    default: "backups/backup.sql"
+    description: "The path to the backup file"
+runs:
+  using: "composite"
+  steps:
+    - name: Cache database
+      id: cache-db
+      uses: actions/cache@v3
+      env:
+        cache-name: cache-db
+        key-1: ${{ hashFiles('packages/prisma/schema.prisma', 'packages/prisma/migrations/**/**.sql', 'packages/prisma/*.ts') }}
+        key-2: ${{ github.event.pull_request.number || github.ref }}
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ runner.os }}-${{ env.cache-name }}-${{ inputs.path }}-${{ env.key-1 }}-${{ env.key-2 }}
+    - run: yarn db-seed
+      if: steps.cache-db.outputs.cache-hit != 'true'
+      shell: bash
+    - name: Postgres Dump Backup
+      if: steps.cache-db.outputs.cache-hit != 'true'
+      uses: tj-actions/pg-dump@v2.3
+      with:
+        database_url: ${{ inputs.DATABASE_URL }}
+        path: ${{ inputs.path }}
+        options: "-O"
+    - name: Postgres Backup Restore
+      if: steps.cache-db.outputs.cache-hit == 'true'
+      uses: tj-actions/pg-restore@v4.5
+      with:
+        database_url: ${{ inputs.DATABASE_URL }}
+        backup_file: ${{ inputs.path }}
